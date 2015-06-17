@@ -1,6 +1,7 @@
 import sys
 import random
 import re
+import time
 
 import networkx
 
@@ -8,7 +9,7 @@ import networkx
 p_cross = 100 * 0.9
 p_mutate = 100 * 0.1
 p_size = 1000
-it = 30  # liczba iteracji algorytmu
+it = 2  # liczba iteracji algorytmu
 
 length = 10
 
@@ -47,13 +48,12 @@ def make_graph():
     Każdy łuk etykietowany jest liczbą oznaczającą stopień 'pokrycia' się połączonych ze sobą oligonukleotydów.
     """
     global g
-    l = len(lines[0])
     g = networkx.MultiDiGraph()
     for lineA in lines:
         for lineB in lines:
             rates = rate_strings(lineA, lineB)
             for rate in rates:
-                g.add_edge(lineA, lineB, l - rate)  # klucze to oceny łańcuchów, wartości są puste
+                g.add_edge(lineA, lineB, length - rate)  # klucze to oceny łańcuchów, wartości są puste
 
 
 def rate_strings(string1, string2) -> list:
@@ -99,8 +99,7 @@ def draw_population(n) -> list:
     while n > 0:
         n -= 1
         instance = draw_instance()
-        instance_rate = percent_rate(instance)
-        population.append((instance, instance_rate))
+        population.append(instance)
     return population
 
 
@@ -111,15 +110,55 @@ def new_population(old_population) -> list:
     :return: nowa populacja.
     """
     population = []
-    sum_rates = sum([x[1] for x in old_population])
-    sorted_population = sorted(population, key=lambda x: x[1])
+    sum_rates = sum([len(x) for x in old_population])
+    sorted_population = sorted(old_population, key=lambda x: len(x))
     accumulated_population = list(accu(sorted_population))
-    n = len(accumulated_population)
-    for i in range(n):
-        r = random.randint(0, sum_rates)
-        index = next(y[0] for x, y in enumerate(accumulated_population) if y[1] > r)
-        population.append(accumulated_population[index])
+
+    for i in range(len(accumulated_population)):
+        r = random.randint(0, sum_rates-1)
+        index = next(x for x, (y, z) in enumerate(accumulated_population) if z > r)
+        population.append(accumulated_population[index][0])
     return population
+
+
+def process_successors(rate, child, other) -> tuple:
+    """
+
+    :param rate:
+    :param child:
+    :param other:
+    :return:
+    """
+    random.shuffle(other)
+    temp = other + lines
+    for a in temp:
+        if a in g.successors(child[-1]):
+            if a not in child:
+                rate += min(g[child[-1]][a].keys())
+                if rate >= b:
+                    return child, rate, False
+                child.append(a)
+                return child, rate, True
+
+
+def process_predecessors(rate, child, other) -> tuple:
+    """
+
+    :param rate:
+    :param child:
+    :param other:
+    :return:
+    """
+    random.shuffle(other)
+    temp = other + lines
+    for a in temp:
+        if a in g.predecessors(child[0]):
+            if a not in child:
+                rate += min(g[a][child[0]].keys())
+                if rate >= b:
+                    return child, rate, False
+                child.insert(0, a)
+                return child, rate, True
 
 
 def cross_operator(parent_a, parent_b) -> tuple:
@@ -129,6 +168,7 @@ def cross_operator(parent_a, parent_b) -> tuple:
     :param parent_b: drugi osobnik.
     :return: para nowych osobników.
     """
+    go_a = go_b = True
     x, y = sorted(random.sample(range(1, length - 1), 2))
     others_a = parent_a[:x] + parent_a[y:]
     others_b = parent_b[:x] + parent_b[y:]
@@ -136,31 +176,25 @@ def cross_operator(parent_a, parent_b) -> tuple:
     child_b = parent_b[x:y]
     rate_a = weight_sum(child_a)
     rate_b = weight_sum(child_b)
-    while True:  # pętla dla childA
-        a = random.choice(others_b)
-        if a in g.successors(child_a[-1]):
-            if rate_a + min(g[child_a[-1]][a].keys()) >= b:
-                break
-            child_a.append(a)
-            rate_a += min(g[child_a[-1]][a].keys())
-        if a in g.predecessors(child_a[0]):
-            if rate_a + min(g[a][child_a[0]].keys()) >= b:
-                break
-            child_a.insert(0, a)
-            rate_a += min(g[a][child_a[0]].keys())
 
-    while True:  # pętla dla childB
-        a = random.choice(others_a)
-        if a in g.successors(child_b[-1]):
-            if rate_b + min(g[child_b[-1]][a].keys()) >= b:
-                break
-            child_a.append(a)
-            rate_b += min(g[child_b[-1]][a].keys())
-        if a in g.predecessors(child_b[0]):
-            if rate_b + min(g[a][child_b[0]].keys()) >= b:
-                break
-            child_a.insert(0, a)
-            rate_b += min(g[a][child_b[0]].keys())
+    while go_a:  # pętla dla childA
+        c = random.randint(0, 1)
+        if c == 0:
+            child_a, rate_a, go_a = process_successors(rate_a, child_a, others_a)
+            child_a, rate_a, go_a = process_predecessors(rate_a, child_a, others_a)
+        else:
+            child_a, rate_a, go_a = process_predecessors(rate_a, child_a, others_a)
+            child_a, rate_a, go_a = process_successors(rate_a, child_a, others_a)
+
+    while go_b:  # pętla dla childB
+        c = random.randint(0, 1)
+        if c == 0:
+            child_b, rate_b, go_b = process_successors(rate_b, child_b, others_b)
+            child_b, rate_b, go_b = process_predecessors(rate_b, child_b, others_b)
+        else:
+            child_b, rate_b, go_b = process_predecessors(rate_b, child_b, others_b)
+            child_b, rate_b, go_b = process_successors(rate_b, child_b, others_b)
+
     return child_a, child_b
 
 
@@ -173,7 +207,7 @@ def crossover(old_population) -> list:
     population = []
     for i in range(len(old_population)):
         x, y = random.sample(old_population, 2)
-        p = random.randint(0, 100)
+        p = random.randint(0, 99)
         if p < p_cross:
             z, f = cross_operator(x, y)
             population.append(z)
@@ -182,15 +216,6 @@ def crossover(old_population) -> list:
             population.append(x)
             population.append(y)
     return population
-
-
-def percent_rate(instance) -> int:
-    """
-    Zwraca jakość rozwiązania wyrażoną w procentach.
-    :param instance: oceniana instancja.
-    :return: zwraca ocenę wyrażoną w procentach.
-    """
-    return 100 * rate_instance(instance) / get_length()
 
 
 def weight_sum(instance) -> int:
@@ -217,6 +242,7 @@ def rate_instance(instance) -> int:
     for i, j in zip(instance[:-1], instance[1:]):
         rates_sum += min(g[i][j].keys())
         rates_sum += length
+    print(len(instance))
     return len(instance) if rates_sum <= b else 0
 
 
@@ -230,7 +256,7 @@ def rate_population(population) -> tuple:
     """
     rates = []
     for p in population:
-        rates.append(percent_rate(p))
+        rates.append(rate_instance(p))
     return min(rates), sum(rates) / len(rates), max(rates)
 
 
@@ -241,8 +267,8 @@ def accu(x):
     :return: lista skumulowanych wartości.
     """
     total = 0
-    for i, j in x:
-        total += j
+    for i in x:
+        total += len(i)
         yield i, total
 
 
@@ -251,14 +277,18 @@ def process():
     Główny algorytm programu.
     """
     x = y = z = 0
+    start_time = time.time()
     print("Start")
+    p1 = draw_population(p_size)  # get int # return list of tuples
     for i in range(it):
-        population = []
-        x, y, z = rate_population(population)
-        if z == 100:
-            break
+        x, y, z = rate_population(p1)  # get list of elements # return tuple
+        p2 = new_population(p1)  # get list of tuples # return list of tuples
+        p1 = crossover(p2)  # get list of elements # return list of elements
+        # print(p1)
+
     print(x, y, z)
     print("Stop")
+    print(time.time() - start_time)
 
 
 def main(arg):
@@ -271,8 +301,7 @@ def main(arg):
     read_data()
     b = get_length() - length
     make_graph()
-    draw_instance()
-    # printData()
+    process()
 
 
 if __name__ == "__main__":
