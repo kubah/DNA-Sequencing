@@ -16,5 +16,8 @@ class TestRateStrings(unittest.TestCase):
     def test4(self):
         self.assertEqual(main.rate_strings("babaca", "abaca"), [1, 5])
 
+    def test5(self):
+        self.assertEqual(main.rate_strings("nazwa", "nazwa"), [])
+
 if __name__ == "__main__":
     unittest.main()

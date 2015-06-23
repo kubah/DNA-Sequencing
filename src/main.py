@@ -5,22 +5,20 @@ import time
 
 import networkx
 
-
 p_cross = 100 * 0.9
 p_mutate = 100 * 0.1
-p_size = 1000
-it = 2  # liczba iteracji algorytmu
-
-length = 10
+p_size = 2000
+it = 20  # liczba iteracji algorytmu
 
 
 def read_data():
     """
     Wczytuje dane z pliku 'filename' do listy 'lines'. Każdy oligonukleotyd jest elementem tej listy.
     """
-    global lines
+    global lines, length
     with open(filename) as file:
         lines = file.read().splitlines()
+    length = len(lines[0])
     file.close()
 
 
@@ -52,13 +50,16 @@ def make_graph():
     for lineA in lines:
         for lineB in lines:
             rates = rate_strings(lineA, lineB)
+            # wagi o wartości 10 odpowiadające przyleganiu kolejnych oligonukleotydów
+            # if lineA != lineB:
+            #     g.add_edge(lineA, lineB, length)
             for rate in rates:
                 g.add_edge(lineA, lineB, length - rate)  # klucze to oceny łańcuchów, wartości są puste
 
 
 def rate_strings(string1, string2) -> list:
     """
-    Wylicza stopień pokrycie się dwóch oligonukleotydów.
+    Wylicza stopień pokrycia się dwóch oligonukleotydów.
     :param string1: Etykieta początkowego oligonukleotydu.
     :param string2: Etykieta końcowego oligonukleotydu.
     :return: stopień pokrycia się oligonukleotydów 'string1' i 'string2'.
@@ -77,14 +78,14 @@ def draw_instance() -> list:
     :return: wylosowana droga.
     """
     instance = []
-    rates_sum = 0
+    rates_sum = length
     first = random.choice(g.nodes())
     instance.append(first)
     while True:
         v = random.choice(g.successors(instance[-1]))
-        if rates_sum + min(g[instance[-1]][v].keys()) >= b:
-            break
         rates_sum += min(g[instance[-1]][v].keys())
+        if rates_sum >= b:
+            break
         instance.append(v)
     return instance
 
@@ -96,8 +97,7 @@ def draw_population(n) -> list:
     :return: pierwsza populacja.
     """
     population = []
-    while n > 0:
-        n -= 1
+    for _ in range(n):
         instance = draw_instance()
         population.append(instance)
     return population
@@ -118,52 +118,53 @@ def new_population(old_population) -> list:
         r = random.randint(0, sum_rates-1)
         index = next(x for x, (y, z) in enumerate(accumulated_population) if z > r)
         population.append(accumulated_population[index][0])
+
     return population
 
 
 def process_successors(rate, child, other) -> tuple:
     """
-
-    :param rate:
-    :param child:
-    :param other:
+    Dodaje na końcu łańcucha child oligonukleotyd z łańcucha other.
+    :param rate: aktualna ocena łańcucha.
+    :param child: aktualny łańcuch dziecka.
+    :param other: aktualny łańcuch pozostałych oligonukleotydów.
     :return:
     """
-    random.shuffle(other)
-    temp = other + lines
-    for a in temp:
+    for a in other:
         if a in g.successors(child[-1]):
-            if a not in child:
-                rate += min(g[child[-1]][a].keys())
-                if rate >= b:
-                    return child, rate, False
-                child.append(a)
-                return child, rate, True
+            rate += min(g[child[-1]][a].keys())
+            if rate > b:
+                return rate, False
+            child.append(a)
+            other.remove(a)
+            return rate, True
+
+    return rate, True
 
 
 def process_predecessors(rate, child, other) -> tuple:
     """
-
-    :param rate:
-    :param child:
-    :param other:
+    Dodaje na początku łańcucha child oligonukleotyd z łańcucha other.
+    :param rate: aktualna ocena łańcucha.
+    :param child: aktualny łańcuch dziecka.
+    :param other: aktualny łańcuch pozostałych oligonukleotydów.
     :return:
     """
-    random.shuffle(other)
-    temp = other + lines
-    for a in temp:
+    for a in other:
         if a in g.predecessors(child[0]):
-            if a not in child:
-                rate += min(g[a][child[0]].keys())
-                if rate >= b:
-                    return child, rate, False
-                child.insert(0, a)
-                return child, rate, True
+            rate += min(g[a][child[0]].keys())
+            if rate > b:
+                return rate, False
+            child.insert(0, a)
+            other.remove(a)
+            return rate, True
+
+    return rate, True
 
 
 def cross_operator(parent_a, parent_b) -> tuple:
     """
-    Operator krzyżowania dwóch osobników w wyniku czego powstają dwa nowe.
+    Operator krzyżowania dwóch osobników w wyniku którego powstają dwa nowe.
     :param parent_a: pierwszy osobnik.
     :param parent_b: drugi osobnik.
     :return: para nowych osobników.
@@ -176,24 +177,34 @@ def cross_operator(parent_a, parent_b) -> tuple:
     child_b = parent_b[x:y]
     rate_a = weight_sum(child_a)
     rate_b = weight_sum(child_b)
+    random.shuffle(others_a)
+    random.shuffle(others_b)
+
+    others_a = [x for x in others_a if x not in child_b]
+    lines_a = [y for y in lines if (y not in others_a and y not in child_b)]
+    others_a = others_a + lines_a
+
+    others_b = [x for x in others_b if x not in child_a]
+    lines_b = [y for y in lines if (y not in others_b and y not in child_a)]
+    others_b = others_b + lines_b
 
     while go_a:  # pętla dla childA
         c = random.randint(0, 1)
         if c == 0:
-            child_a, rate_a, go_a = process_successors(rate_a, child_a, others_a)
-            child_a, rate_a, go_a = process_predecessors(rate_a, child_a, others_a)
+            rate_a, go_a = process_successors(rate_a, child_a, others_a)
+            rate_a, go_a = process_predecessors(rate_a, child_a, others_a)
         else:
-            child_a, rate_a, go_a = process_predecessors(rate_a, child_a, others_a)
-            child_a, rate_a, go_a = process_successors(rate_a, child_a, others_a)
+            rate_a, go_a = process_predecessors(rate_a, child_a, others_a)
+            rate_a, go_a = process_successors(rate_a, child_a, others_a)
 
     while go_b:  # pętla dla childB
         c = random.randint(0, 1)
         if c == 0:
-            child_b, rate_b, go_b = process_successors(rate_b, child_b, others_b)
-            child_b, rate_b, go_b = process_predecessors(rate_b, child_b, others_b)
+            rate_b, go_b = process_successors(rate_b, child_b, others_b)
+            rate_b, go_b = process_predecessors(rate_b, child_b, others_b)
         else:
-            child_b, rate_b, go_b = process_predecessors(rate_b, child_b, others_b)
-            child_b, rate_b, go_b = process_successors(rate_b, child_b, others_b)
+            rate_b, go_b = process_predecessors(rate_b, child_b, others_b)
+            rate_b, go_b = process_successors(rate_b, child_b, others_b)
 
     return child_a, child_b
 
@@ -205,7 +216,8 @@ def crossover(old_population) -> list:
     :return: nowa populacja wynikowa.
     """
     population = []
-    for i in range(len(old_population)):
+    n = int(len(old_population)/2)
+    for i in range(n):
         x, y = random.sample(old_population, 2)
         p = random.randint(0, 99)
         if p < p_cross:
@@ -224,10 +236,9 @@ def weight_sum(instance) -> int:
     :param instance: przetwarzana droga.
     :return: suma wartości wszystkich łuków w drodze.
     """
-    w_sum = 0
+    w_sum = length
     for i, j in zip(instance[:-1], instance[1:]):
         w_sum += min(g[i][j].keys())
-        w_sum += length
     return w_sum
 
 
@@ -238,11 +249,11 @@ def rate_instance(instance) -> int:
     :return: ocena drogi. Liczba wierzchołków należących do drogi
     lub 0 jeśli suma wag łuków jest większa niż wartość 'b'.
     """
-    rates_sum = 0
+    rates_sum = length
     for i, j in zip(instance[:-1], instance[1:]):
         rates_sum += min(g[i][j].keys())
-        rates_sum += length
-    print(len(instance))
+
+    # print(len(instance), rates_sum, b)
     return len(instance) if rates_sum <= b else 0
 
 
@@ -272,36 +283,42 @@ def accu(x):
         yield i, total
 
 
-def process():
+def process() -> tuple:
     """
     Główny algorytm programu.
+    :return:
     """
     x = y = z = 0
+    print("START")
     start_time = time.time()
-    print("Start")
-    p1 = draw_population(p_size)  # get int # return list of tuples
+    p1 = draw_population(p_size)
+    x, y, z = rate_population(p1)
+    print("LOOP")
     for i in range(it):
-        x, y, z = rate_population(p1)  # get list of elements # return tuple
-        p2 = new_population(p1)  # get list of tuples # return list of tuples
-        p1 = crossover(p2)  # get list of elements # return list of elements
-        # print(p1)
+        p2 = new_population(p1)
+        p1 = crossover(p2)
+        x, y, z = rate_population(p1)
+        print("Iteration:", i, "min:", x, "avg:", y, "max:", z)
 
-    print(x, y, z)
-    print("Stop")
-    print(time.time() - start_time)
+    t = time.time() - start_time
+    print(t)
+    print("STOP")
+    return x, y, z, t
 
 
 def main(arg):
     """
     Główna funkcja odpowiadająca za agregację funkcji przetwarzających.
     :param arg: nazwa pliku, z którego pobierane są dane.
+    :return data: (minimum, średnia, maksimum, czas)
     """
     global b, filename
     filename = arg
     read_data()
     b = get_length() - length
     make_graph()
-    process()
+    data = process()
+    return data
 
 
 if __name__ == "__main__":
